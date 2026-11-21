@@ -1,0 +1,39 @@
+import streamlit as st
+import time
+import requests
+from rag_pipeline import VocabRAG
+from db import QueryRecordDB
+
+# 简易API封装：超时、重试、限流
+def call_llm_with_retry(prompt, retries=3, timeout=15):
+    for i in range(retries):
+        try:
+            resp = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                json={
+                    "model": "gpt-3.5-turbo",
+                    "messages": [{"role": "user", "content": prompt}]
+                },
+                timeout=timeout
+            )
+            return resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            time.sleep(1)
+            continue
+    return None
+
+st.title("CET Vocabulary RAG Assistant")
+word = st.text_input("Input English word")
+
+if word:
+    rag = VocabRAG(api_key="YOUR_API_KEY")
+    docs = rag.retrieve(word)
+    prompt = rag.build_prompt(word, docs)
+    res = call_llm_with_retry(prompt)
+    if res and rag.format_check(res):
+        st.write(res)
+        db = QueryRecordDB("localhost", "root", "pwd", "vocab_db")
+        db.insert_record(word, res)
+        db.close()
+    else:
+        st.error("Generate failed, format error or api timeout")
